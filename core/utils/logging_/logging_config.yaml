@@ -1,0 +1,94 @@
+# common settings
+version: 1
+disable_existing_loggers: false
+# - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+
+
+
+# formatters
+formatters:
+    standard:
+        format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+
+    detailed:
+        format: "%(asctime)s - %(name)s - %(levelname)s - %(threadName)s - %(thread)d - %(filename)s - %(funcName)s() [%(lineno)s] : %(message)s"
+# - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+
+
+# filters
+filters:
+    # catches logs !only! with DEBUG level
+    DEBUGFilter:
+        # path to filter from the core package
+        (): core.utils.logging_.filters.LevelFilter
+        level: DEBUG
+
+    # catches logs !only! with INFO level
+    INFOFilter:
+        # path to filter from the core package
+        (): core.utils.logging_.filters.LevelFilter
+        level: INFO
+
+
+# handlers
+handlers:
+    # only DEBUG
+    debug_console:
+        class: logging.StreamHandler
+        level: DEBUG
+        formatter: detailed
+        stream: ext://sys.stdout
+        filters: [DEBUGFilter]
+
+    # only INFO
+    info_console:
+        class: logging.StreamHandler
+        level: INFO
+        formatter: detailed
+        stream: ext://sys.stdout
+        filters: [INFOFilter]
+
+    # WARN and higher logs
+    error_console:
+        class: logging.StreamHandler
+        level: WARN
+        formatter: detailed
+        stream: ext://sys.stderr
+
+    # INFO and higher logs in file
+    info_file_handler:
+        class: logging.handlers.RotatingFileHandler
+        level: INFO
+        formatter: detailed
+        filename: /~tmp/logs/energiya-prirody-parser/info.log
+        maxBytes: 1000000 # 1MB
+        backupCount: 3
+        encoding: utf8
+
+    # WARN and higher logs in file
+    error_file_handler:
+        class: logging.handlers.RotatingFileHandler
+        level: WARN
+        formatter: detailed
+        filename: /~tmp/logs/energiya-prirody-parser/error.log
+        maxBytes: 1000000 # 1MB
+        backupCount: 3
+        encoding: utf8
+# - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+
+
+# root logger
+root:
+    level: INFO
+    handlers: [debug_console, info_console, error_console, info_file_handler, error_file_handler]
+    propogate: yes
+# - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+
+
+# loggers
+loggers:
+    # name of the main package
+    core:
+        level: INFO
+        propogate: yes
+# - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
