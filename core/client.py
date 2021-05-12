@@ -5,12 +5,14 @@ Contains convenient client for product parser.
     Implements client for product parser
 """
 
+import contextlib
 import json
 import logging
 import pathlib
 import time
 from concurrent.futures import thread
 from typing import (
+    Iterable,
     Iterator,
     Optional
 )
@@ -36,9 +38,9 @@ __all__ = ['ParserClient']
 
 logger = logging.getLogger(__name__)
 # set tqdm stream for logging ------------------------------------------------------------------------------------------
-for logger_handler in logger.handlers:
-    if isinstance(logger_handler, logging.StreamHandler) and logger.level == logging.INFO:
-        logger_handler.setStream(tqdm)
+# for logger_handler in logger.handlers:
+#     if isinstance(logger_handler, logging.StreamHandler) and logger.level == logging.INFO:
+#         logger_handler.setStream(tqdm)
 # ----------------------------------------------------------------------------------------------------------------------
 
 
@@ -100,7 +102,7 @@ class ParserClient:
             logger.debug('Passed http client has been set.')
 
     def __repr__(self) -> str:
-        return f'ParserClient(_dump_dir={self._dump_dir}, client={self._client})'
+        return f'ParserClient(dump_dir={self._dump_dir}, client={self._client})'
 
     @property
     def dump_dir(self) -> pathlib.Path:
@@ -148,7 +150,7 @@ class ParserClient:
         :rtype: None
         """
 
-        for product_url, product_name, product_data in tqdm(products_data):
+        for product_url, product_name, product_data in products_data:
             product_dump_filepath = self._dump_product_in_json(products_dump_dir, product_name, product_data)
             log = (
                 f'Product with name: {product_name}, from URL: {product_url}, '
@@ -182,7 +184,7 @@ class ParserClient:
 
     def _get_product_data(self, url: str) -> tuple[str, str, dict]:
         """
-        Get tuple of values: (product name, product data).
+        Get tuple of values: (product url, product name, product data).
 
         Structure:
             * product url  - ``str``  - url on web page with product;
@@ -240,10 +242,62 @@ class ParserClient:
 
         return products_dump_dir
 
+    def _fetch_products_data_with_thread_pool_executor(self,
+                                                       links: Iterable[str],
+                                                       *,
+                                                       max_workers: Optional[int] = None,
+                                                       ) -> Iterator[tuple[str, str, dict]]:
+        """
+        Fetch iterator of the products data.
+        Returned iterator of the results of ``_get_product_data`` method.
+
+        Note: iterator might contain error that has occurred during
+        thread pool execution.
+
+        :param links: links that refer on the product web pages
+        :type links: Iterable[str]
+        :param max_workers: max workers of the pool
+        :type max_workers: Optional[int]
+
+        :return: iterator of products data (results of the ``_get_product_data``)
+        :rtype: Iterator[tuple[str, str, dict]]
+        """
+
+        thread_pool_params = {
+            'max_workers': max_workers,
+            'thread_name_prefix': 'ParserClient.dump_products'
+        }
+
+        with thread.ThreadPoolExecutor(**thread_pool_params) as executor:
+            logger.info(f'Quantity of used workers in pool: {executor._max_workers}.')
+            products_data_iterator: Iterator[tuple[str, str, dict]] = executor.map(
+                self._get_product_data,
+                links
+            )
+
+        return products_data_iterator
+
+        # --------------------------------------------------------------------------------------------------------------
+
+        # # for errors raising
+        # products_data: list[tuple[str, str, dict]] = list(products_data)
+
+        # # # # with ``tqdm.thread_map``
+        # # # tqdm.std.TqdmKeyError: "Unknown argument(s): {'thread_name_prefix': 'ParserClient.dump_products'}"
+        # thread_pool_params.pop('thread_name_prefix')
+        # products_data_iterator: Iterator[tuple[str, str, dict]] = thread_map(
+        #     self._get_product_data,
+        #     links,
+        #     **thread_pool_params
+        # )
+
     @track_time
     def dump_products(self, url: str, products_dump_dir_name: Optional[str] = None,
                       *,
                       max_workers: Optional[int] = None,
+                      products_dump_dir_from_broken_invocation: Optional[pathlib.Path] = None,
+                      left_links_for_handling_from_broken_invocation: Optional[Iterable[str]] = None,
+                      prepared_products_data_from_broken_invocation: Optional[list[tuple[str, str, dict]]] = None
                       ) -> None:
         """
         Dump data of the products in directory with ``.json`` files
@@ -255,58 +309,72 @@ class ParserClient:
         :type products_dump_dir_name: Optional[str]
         :keyword max_workers: num of the max workers in pool
         :type max_workers: Optional[int]
+        :keyword products_dump_dir_from_broken_invocation: filepath to products dump dir
+        :type products_dump_dir_from_broken_invocation: Optional[pathlib.Path]
+        :keyword left_links_for_handling_from_broken_invocation: links that
+            left for handling from previous method invocation that
+            has been broken by network error that
+            occurred on thread pool result iteration
+            (so, links that are left unhandled are computed
+            from broken invocation and passed here)
+        :type left_links_for_handling_from_broken_invocation: Optional[Iterable[str]]
+        :keyword prepared_products_data_from_broken_invocation: products data from
+            previous method invocation that has been broken by
+            network error that occurred on thread pool result iteration
+            (so, part of requests that have been finished successfully
+            are added in this list)
+        :type prepared_products_data_from_broken_invocation: Optional[list[tuple[str, str, dict]]]
 
         :return: dump products data in the ``.json`` files; return none
         :rtype: None
         """
 
-        products_dump_dir = self._prepare_dir_for_products_data(url, products_dump_dir_name)
-        logger.info(f'Products data from url: {url!r} | will be saved in: {products_dump_dir!s}')
+        if not prepared_products_data_from_broken_invocation:
+            products_dump_dir = self._prepare_dir_for_products_data(url, products_dump_dir_name)
+            logger.info(f'Products data from url: {url!r} | will be saved in: {products_dump_dir!s}')
+            links = self._get_all_products_links(url)
+            products_data: list[tuple[str, str, dict]] = []
+        else:
+            if not products_dump_dir_from_broken_invocation or not left_links_for_handling_from_broken_invocation:
+                message = (
+                    'Data from broken invocation are not complected. '
+                    f'Product dump dir: {products_dump_dir_from_broken_invocation!r}. '
+                    f'Left links: {left_links_for_handling_from_broken_invocation!r}'
+                )
+                raise ValueError(message)
 
-        links = self._get_all_products_links(url)
+            products_dump_dir = products_dump_dir_from_broken_invocation
+            links = left_links_for_handling_from_broken_invocation
+            products_data: list[tuple[str, str, dict]] = prepared_products_data_from_broken_invocation
+
+            logger.info(f'Working with data from broken method invocation. Left links: {links!s}')
 
         logger.info('STARTING [DOWNLOADING | PARSING] PROCESS.')
+        products_data_iterator = self._fetch_products_data_with_thread_pool_executor(links, max_workers=max_workers)
 
-        thread_pool_params = {
-            'max_workers': max_workers,
-            'thread_name_prefix': 'ParserClient.dump_products'
-        }
-
-        # # # with ``tqdm.thread_map``
-        # # tqdm.std.TqdmKeyError: "Unknown argument(s): {'thread_name_prefix': 'ParserClient.dump_products'}"
-        thread_pool_params.pop('thread_name_prefix')
-        products_data_iterator: Iterator[tuple[str, str, dict]] = thread_map(
-            self._get_product_data,
-            links,
-            **thread_pool_params
-        )
-
-        # # # # without ``tqdm``
-        # with thread.ThreadPoolExecutor(**thread_pool_params) as executor:
-        #     logger.info(f'Quantity of used workers in pool: {executor._max_workers}.')
-        #     products_data_iterator: Iterator[tuple[str, str, dict]] = executor.map(
-        #         self._get_product_data,
-        #         links
-        #     )
-
-        # # for errors raising
-        # products_data: list[tuple[str, str, dict]] = list(products_data)
-
-        products_data = []
         try:
             for product_data in products_data_iterator:
                 products_data.append(product_data)
         # except error that might have been raised
         # but actually waking on getting generator result (with error)
-        except httpx.ReadTimeout as error:
-            logging.exception('Error has been occured during network requesting.', exc_info=error)
+        except httpx.NetworkError as error:
+            logging.exception('Error has been occured during network interacting.', exc_info=error)
 
             minutes_to_sleep = DEFAULT_MINUTES_TO_SLEEP_ON_NETWORK_ERROR
             logger.info(f'Sleeping for {minutes_to_sleep} minute[s]...')
             time.sleep(60 * minutes_to_sleep)
 
             logger.info(f'Have woken up after {minutes_to_sleep} minute[s] of sleeping. Trying to work again...')
-            self.dump_products(url, )
+            # list (``list``) of products data contains tuples (``tuple``) that contains:
+            # product url (``str``) [0], product name (``str``) [1], product data for damping (``dict``) [2]
+            handled_links = {product_data[0] for product_data in products_data}
+            unhandled_links = set(links) - handled_links
+            self.dump_products(
+                url,
+                max_workers=max_workers,
+                left_links_for_handling_from_broken_invocation=unhandled_links,
+                prepared_products_data_from_broken_invocation=products_data
+            )
         else:
             log = (
                 'Process of [downloading | parsing] has been finished SUCCESSFULLY. '
@@ -387,6 +455,17 @@ class ParserClient:
                 )
             )
             logger.info(log)
+
+    @classmethod
+    @contextlib.contextmanager
+    def manager(cls, *args, **kwargs) -> 'ParserClient':
+        """ Context manager for ``ParserClient`` """
+        self = cls(*args, **kwargs)
+
+        try:
+            yield self
+        finally:
+            self.close()
 
     def close(self) -> None:
         """ Close parser client """
