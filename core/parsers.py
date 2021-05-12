@@ -177,7 +177,7 @@ class ProductParser:
         # user_content = self._user_content_section.text
 
         # temporarily
-        user_content_html = self._user_content_section.find_all('p', limit=3)
+        user_content_html = self._user_content_section.find_all('p', limit=1)
         user_content = '\n'.join(p.text for p in user_content_html)
 
         return user_content
@@ -199,6 +199,7 @@ class ProductParser:
             'image': self.image_link,
             'extra_images': self.extra_images_links,
             'user_content_images_links': self.user_content_images_links,
+            'all_images_links': self.all_images_links,
             'user_content': self.user_content,
             'characteristics': self.characteristics,
         }
