@@ -25,9 +25,9 @@ def main() -> None:
     Executable in entry point (__main__.py).
     """
 
-    # do something
-    client = ParserClient()
-
-    url = 'https://energiya-prirody.prom.ua/g26846814-biolux'
-    client.dump_products(url)
-
+    client: ParserClient
+    with ParserClient.manager() as client:
+        client.dump_products(
+            'https://energiya-prirody.prom.ua/g19072746-avtonomnye-solnechnye-elektrostantsii',
+            max_workers=3
+        )
