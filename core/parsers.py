@@ -29,7 +29,9 @@ class ProductParser:
     .. property:: price(self) -> str
     .. property:: image_link(self) -> str
     .. property:: extra_images_links(self) -> list[str]
+    .. property:: user_content_images_links(self) -> list[str]
     .. property:: all_images_links(self) -> list[str]
+    .. property:: _user_content_section(self) -> bs4.Tag
     .. property:: user_content(self) -> str
     .. property:: characteristics(self) -> dict
 
@@ -52,6 +54,9 @@ class ProductParser:
 
         self._original_url = original_url
         self._soup = BeautifulSoup(html_text, 'html.parser')
+
+    def __repr__(self) -> str:
+        return f'ProductParser(original_url={self.original_url}, title={self.title})'
 
     @staticmethod
     def _parse_table(table: bs4.Tag) -> dict:
@@ -146,18 +151,36 @@ class ProductParser:
         return extra_images_links
 
     @property
+    def user_content_images_links(self) -> list[str]:
+        """ Get links on the images in user content section """
+        images_html = self._user_content_section.find_all('img')
+        user_content_images_links = [image.get('src') for image in images_html]
+
+        return user_content_images_links
+
+    @property
     def all_images_links(self) -> list[str]:
         """ Get all links on product images """
-        all_images_links = [self.image_link] + self.extra_images_links
+        all_images_links = list(set([self.image_link] + self.extra_images_links + self.user_content_images_links))
 
         return all_images_links
 
     @property
+    def _user_content_section(self) -> bs4.Tag:
+        user_content_section = self._soup.find('div', {'class': 'b-user-content'})
+
+        return user_content_section
+
+    @property
     def user_content(self) -> str:
         """ Get product section with user content """
-        content = self._soup.find('div', {'class': 'b-user-content'}).text
+        # user_content = self._user_content_section.text
 
-        return content
+        # temporarily
+        user_content_html = self._user_content_section.find_all('p', limit=3)
+        user_content = '\n'.join(p.text for p in user_content_html)
+
+        return user_content
 
     @property
     def characteristics(self) -> dict:
@@ -175,8 +198,9 @@ class ProductParser:
             'price': self.price,
             'image': self.image_link,
             'extra_images': self.extra_images_links,
-            'characteristics': self.characteristics,
+            'user_content_images_links': self.user_content_images_links,
             'user_content': self.user_content,
+            'characteristics': self.characteristics,
         }
 
         return data
