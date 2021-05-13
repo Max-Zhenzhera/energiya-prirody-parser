@@ -1,5 +1,5 @@
 """
-Contains parser for products.
+Contains product parser.
 
 .. class:: ProductParser
     Implements parser for product page
@@ -9,9 +9,9 @@ import logging
 from copy import deepcopy
 
 import bs4
-from bs4 import BeautifulSoup
 
-from .utils.normalization import normalize_unicode_string
+from .base import BaseParser
+from ..utils.normalization import normalize_unicode_string
 
 
 __all__ = ['ProductParser']
@@ -20,11 +20,13 @@ __all__ = ['ProductParser']
 logger = logging.getLogger(__name__)
 
 
-class ProductParser:
+class ProductParser(BaseParser):
     """
     Implements parser for product page.
 
-    .. property:: original_url(self) -> str
+    .. attr:: _soup
+
+    .. property:: soup(self) -> bs4.BeautifulSoup
     .. property:: title(self) -> str
     .. property:: price(self) -> str
     .. property:: image_link(self) -> str
@@ -44,19 +46,16 @@ class ProductParser:
 
     def __init__(self, original_url: str, html_text: str):
         """
-        Build soup[parsing engine] on product page html.
-
-        :param original_url: url of the product page
-        :type original_url: str
-        :param html_text: html of the product page
-        :type html_text: str
+        Init product parser.
+        All init arguments are inherited from base class.
         """
 
-        self._original_url = original_url
-        self._soup = BeautifulSoup(html_text, 'html.parser')
+        super().__init__(original_url, html_text)
+
+        self._soup = bs4.BeautifulSoup(html_text, 'html.parser')
 
     def __repr__(self) -> str:
-        return f'ProductParser(original_url={self.original_url}, title={self.title})'
+        return f'{self.__class__.__name__}(title={self.title}, original_url={self.original_url})'
 
     @staticmethod
     def _parse_table(table: bs4.Tag) -> dict:
@@ -111,8 +110,11 @@ class ProductParser:
         return table_info
 
     @property
-    def original_url(self) -> str:
-        return self._original_url
+    def soup(self) -> bs4.BeautifulSoup:
+        """ Get ``BeautifulSoup`` object of the parser """
+        soup = self._soup
+
+        return soup
 
     @property
     def title(self) -> str:
