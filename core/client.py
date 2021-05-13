@@ -26,7 +26,10 @@ from tqdm import (
 )
 from tqdm.contrib.concurrent import thread_map
 
-from .parsers import ProductParser
+from .parsers import (
+    ProductParser,
+    ProductsAssortmentParser
+)
 from .settings import (
     DEFAULT_DUMP_DIR,
     DEFAULT_CLIENT_HEADERS,
@@ -63,7 +66,7 @@ class ParserClient:
 
     .. method:: _dump_all_products_in_json(self, products_dump_dir: pathlib.Path, products: list[Product]) -> None
         Dump all products in json
-    .. method:: _get_all_products_links(self, url: str) -> list[str]
+    .. method:: _get_products_links(self, url: str) -> list[str]
         Get all links on products from url that refers on page with products assortment
     .. method:: _get_product(self, url: str) -> Product
         Get product instance
@@ -193,7 +196,7 @@ class ParserClient:
             )
             logger.info(log)
 
-    def _get_all_products_links(self, url: str) -> list[str]:
+    def _get_products_links(self, url: str) -> list[str]:
         """
         Get all links on products.
 
@@ -213,17 +216,17 @@ class ParserClient:
                 logging.exception('Error has been occured during network interacting.', exc_info=error)
             seconds_to_sleep = int(DEFAULT_MINUTES_TO_SLEEP_ON_NETWORK_ERROR_IN_FUNCTION * 60)
             self._sleep_with_tqdm_bar(seconds_to_sleep)
-            self._get_all_products_links(url)
+            self._get_products_links(url)
         else:
             logger.info(f'Loaded page with assortment of products with url: {url!r}')
 
-            parser = BeautifulSoup(response.text, 'html.parser')
+            response_text = response.text
 
-            links_html = parser.find_all('a', {'class': 'b-product-gallery__title'})
-            links = [link.get('href') for link in links_html]
+            parser = ProductsAssortmentParser(url, response_text)
+            links = parser.links
 
-            links_log = '\n\t'.join(links)
-            logger.info(f'Have been found {len(links)} links on the page.\nList of the links:\n\t{links_log}')
+            links_log = ''.join(f'\n\t{link}' for link in links)
+            logger.info(f'Have been found {len(links)} links on the page.\nList of the links:{links_log}')
 
             return links
 
@@ -386,7 +389,7 @@ class ParserClient:
         if not prepared_products_from_broken_invocation:
             products_dump_dir = self._prepare_dir_for_products(url, products_dump_dir_name)
             logger.info(f'Products from url: {url!r} | will be saved in: {products_dump_dir!s}')
-            links = self._get_all_products_links(url)
+            links = self._get_products_links(url)
             products: list[Product] = []
         else:
             if not products_dump_dir_from_broken_invocation or not left_links_for_handling_from_broken_invocation:
