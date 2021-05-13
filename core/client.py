@@ -34,6 +34,7 @@ from .settings import (
     DEFAULT_MINUTES_TO_SLEEP_ON_ERROR,
     LOGGING_CONFIG_PATH
 )
+from .types import Product
 from .utils.stopwatch import track_time
 
 
@@ -56,28 +57,27 @@ class ParserClient:
 
     .. staticmethod:: _sleep_with_tqdm_bar(seconds: int) -> None
         Sleep with ``tqdm`` progress bar
-    .. staticmethod:: _dump_product_in_json(products_dump_dir: pathlib.Path, product_name: str, product_data: dict, *,
+    .. staticmethod:: _dump_product_in_json(products_dump_dir: pathlib.Path, product: Product, *,
             prefix: Optional[str] = '') -> pathlib.Path
         Dump one product in json
 
-    .. method:: _dump_all_products_in_json(self, products_dump_dir: pathlib.Path,
-            products_data: list[tuple[str, str, dict]]) -> None
+    .. method:: _dump_all_products_in_json(self, products_dump_dir: pathlib.Path, products: list[Product]) -> None
         Dump all products in json
     .. method:: _get_all_products_links(self, url: str) -> list[str]
         Get all links on products from url that refers on page with products assortment
-    .. method:: _get_product_data(self, url: str) -> tuple[str, str, dict]
-        Get tuple of: product url, product name, product data
-    .. method:: _prepare_dir_for_products_data(self, url: str, products_dump_dir_name: Optional[str] = None
+    .. method:: _get_product(self, url: str) -> Product
+        Get product instance
+    .. method:: _prepare_dir_for_products(self, url: str, products_dump_dir_name: Optional[str] = None
             ) -> pathlib.Path:
         Prepare dir for products dump
-    .. method:: _fetch_products_data_with_thread_pool_executor(self, links: Iterable[str], *,
-            max_workers: Optional[int] = None) -> Iterator[tuple[str, str, dict]]
-        Fetch iterator with ``_get_product_data`` results executed by thread pool
+    .. method:: _fetch_products_with_thread_pool_executor(self, links: Iterable[str], *,
+            max_workers: Optional[int] = None) -> Iterator[Product]
+        Fetch iterator of products (with ``_get_product`` results executed by thread pool)
     .. method:: dump_products(self, url: str, products_dump_dir_name: Optional[str] = None, *,
             max_workers: Optional[int] = None,
             products_dump_dir_from_broken_invocation: Optional[pathlib.Path] = None,
             left_links_for_handling_from_broken_invocation: Optional[Iterable[str]] = None,
-            prepared_products_data_from_broken_invocation: Optional[list[tuple[str, str, dict]]] = None
+            prepared_products_from_broken_invocation: Optional[list[Product]] = None
             ) -> None
         Dump all products by url that refers on page with products assortment
     .. method:: dump_product(self, url: str, products_dump_dir_name: Optional[str] = None) -> None
@@ -144,7 +144,7 @@ class ParserClient:
         logger.info(f'Have woken up after {seconds} second[s] of sleeping. Trying to work again...')
 
     @staticmethod
-    def _dump_product_in_json(products_dump_dir: pathlib.Path, product_name: str, product_data: dict,
+    def _dump_product_in_json(products_dump_dir: pathlib.Path, product: Product,
                               *,
                               prefix: Optional[str] = ''
                               ) -> pathlib.Path:
@@ -153,10 +153,8 @@ class ParserClient:
 
         :param products_dump_dir: directory path for product dump
         :type products_dump_dir: pathlib.Path
-        :param product_name: name of the product
-        :type product_name: str
-        :param product_data: data of the product
-        :type product_data: dict
+        :param product: product instance
+        :type product: Product
         :keyword prefix: string that will be inserted in start of the filename
         :type prefix: Optional[str]
 
@@ -165,38 +163,32 @@ class ParserClient:
         """
 
         file_extension = 'json'
-        valid_product_name = product_name.replace('/', '-').replace('\\', '-').replace('\'', '').replace('\"', '')
-        filename = f'{prefix}{valid_product_name}.{file_extension}'
+        valid_product_title = product.title.replace('/', '-').replace('\\', '-').replace('\'', '').replace('\"', '')
+        filename = f'{prefix}{valid_product_title}.{file_extension}'
         filepath = products_dump_dir / filename
         with open(filepath, 'w', encoding='utf-8') as file:
-            json.dump(product_data, file, ensure_ascii=False, indent=4)
+            json.dump(product.data, file, ensure_ascii=False, indent=4)
 
         return filepath
 
-    def _dump_all_products_in_json(self,
-                                   products_dump_dir: pathlib.Path,
-                                   products_data: list[tuple[str, str, dict]]
-                                   ) -> None:
+    def _dump_all_products_in_json(self, products_dump_dir: pathlib.Path, products: list[Product]) -> None:
         """
         Dump all products in json.
 
         :param products_dump_dir: directory path for products dump
         :type products_dump_dir: pathlib.Path
-        :param products_data: data of the parsed products
-        :type products_data: Iterator[tuple[str, str, dict]]
+        :param products: product instances
+        :type products: list[Product]
 
         :return: dump all products in json; return none
         :rtype: None
         """
 
-        for index, product_data in enumerate(products_data):
-            product_url, product_name, product_data = product_data
+        for index, product in enumerate(products, start=1):
             prefix = f'{index:^2}-'
-            product_dump_filepath = self._dump_product_in_json(
-                products_dump_dir, product_name, product_data, prefix=prefix
-            )
+            product_dump_filepath = self._dump_product_in_json(products_dump_dir, product, prefix=prefix)
             log = (
-                f'Product with name: {product_name}, from URL: {product_url}, '
+                f'Product with name: {product.title}, from URL: {product.original_url}, '
                 f'has been dumped in: {product_dump_filepath!s}.'
             )
             logger.info(log)
@@ -219,7 +211,7 @@ class ParserClient:
                 logging.exception('Error has been occured during network interacting (read timeout).')
             else:
                 logging.exception('Error has been occured during network interacting.', exc_info=error)
-            seconds_to_sleep = int(DEFAULT_MINUTES_TO_SLEEP_ON_ERROR * 60)
+            seconds_to_sleep = int(DEFAULT_MINUTES_TO_SLEEP_ON_NETWORK_ERROR_IN_FUNCTION * 60)
             self._sleep_with_tqdm_bar(seconds_to_sleep)
             self._get_all_products_links(url)
         else:
@@ -235,20 +227,15 @@ class ParserClient:
 
             return links
 
-    def _get_product_data(self, url: str) -> tuple[str, str, dict]:
+    def _get_product(self, url: str) -> Product:
         """
-        Get tuple of values: (product url, product name, product data).
+        Get product instance.
 
-        Structure:
-            * product url  - ``str``  - url on web page with product;
-            * product name - ``str``  - just product name;
-            * product name - ``dict`` - ``dict`` of product data (prepared for dumping).
-
-        :param url: url on product page
+        :param url: url of product page
         :type url: str
 
-        :return: product name and product data in tuple
-        :rtype: tuple[str, dict]
+        :return: product instance
+        :rtype: Product
         """
 
         try:
@@ -261,24 +248,21 @@ class ParserClient:
             seconds_to_sleep = int(DEFAULT_MINUTES_TO_SLEEP_ON_NETWORK_ERROR_IN_FUNCTION * 60)
             self._sleep_with_tqdm_bar(seconds_to_sleep)
 
-            return self._get_product_data(url)
+            return self._get_product(url)
         else:
             logger.info(f'Loaded page with product. URL: {url!r}')
 
             response_text = response.text
 
             parser = ProductParser(url, response_text)
-            product_name = parser.title
-            product_data = parser.get_data()
-            logger.info(f'Parsed product data with name: {product_name}. From URL: {url}')
-
-            product = (url, product_name, product_data)
+            product = Product(parser)
+            logger.info(f'Parsed product with name: {product.title}. From URL: {url}')
 
             return product
 
-    def _prepare_dir_for_products_data(self, url: str, products_dump_dir_name: Optional[str] = None) -> pathlib.Path:
+    def _prepare_dir_for_products(self, url: str, products_dump_dir_name: Optional[str] = None) -> pathlib.Path:
         """
-        Prepare directory for future products data
+        Prepare directory for future products
         and return path to it.
 
         :param url: used for generating directory name if passed directory name is empty
@@ -306,14 +290,11 @@ class ParserClient:
 
         return products_dump_dir
 
-    def _fetch_products_data_with_thread_pool_executor(self,
-                                                       links: Iterable[str],
-                                                       *,
-                                                       max_workers: Optional[int] = None
-                                                       ) -> Iterator[tuple[str, str, dict]]:
+    def _fetch_products_with_thread_pool_executor(self, links: Iterable[str], *, max_workers: Optional[int] = None
+                                                  ) -> Iterator[Product]:
         """
-        Fetch iterator of the products data.
-        Returned iterator of the results of ``_get_product_data`` method.
+        Fetch iterator of the products.
+        Returned iterator of the results of ``_get_product`` method.
 
         Note: iterator might contain error that has occurred during
         thread pool execution.
@@ -323,35 +304,37 @@ class ParserClient:
         :param max_workers: max workers of the pool
         :type max_workers: Optional[int]
 
-        :return: iterator of products data (results of the ``_get_product_data``)
-        :rtype: Iterator[tuple[str, str, dict]]
+        :return: iterator of products
+        :rtype: Iterator[Product]
         """
 
         thread_pool_params = {
             'max_workers': max_workers,
-            'thread_name_prefix': 'ParserClient.dump_products'
+            'thread_name_prefix': f'{self.__class__.__name__}.dump_products'
         }
 
         with thread.ThreadPoolExecutor(**thread_pool_params) as executor:
             logger.info(f'Quantity of used workers in pool: {executor._max_workers}.')
-            products_data_iterator: Iterator[tuple[str, str, dict]] = executor.map(
-                self._get_product_data,
+            products_iterator: Iterator[Product] = executor.map(
+                self._get_product,
                 links
             )
 
-        return products_data_iterator
+        return products_iterator
 
         # --------------------------------------------------------------------------------------------------------------
 
         # # for errors raising
-        # products_data: list[tuple[str, str, dict]] = list(products_data)
+        # products: list[Product] = list(products_iterator)
+
+        # --------------------------------------------------------------------------------------------------------------
 
         # # # # with ``tqdm.thread_map``
         # # # Note: return list - no iterator
         # # # tqdm.std.TqdmKeyError: "Unknown argument(s): {'thread_name_prefix': 'ParserClient.dump_products'}"
         # thread_pool_params.pop('thread_name_prefix')
-        # products_data_iterator: Iterator[tuple[str, str, dict]] = thread_map(
-        #     self._get_product_data,
+        # products: list[Product] = thread_map(
+        #     self._get_product,
         #     links,
         #     **thread_pool_params
         # )
@@ -362,7 +345,7 @@ class ParserClient:
                       max_workers: Optional[int] = None,
                       products_dump_dir_from_broken_invocation: Optional[pathlib.Path] = None,
                       left_links_for_handling_from_broken_invocation: Optional[Iterable[str]] = None,
-                      prepared_products_data_from_broken_invocation: Optional[list[tuple[str, str, dict]]] = None
+                      prepared_products_from_broken_invocation: Optional[list[Product]] = None
                       ) -> None:
         """
         Dump data of the products in directory with ``.json`` files
@@ -389,22 +372,22 @@ class ParserClient:
             (so, links that are left unhandled are computed
             from broken invocation and passed here)
         :type left_links_for_handling_from_broken_invocation: Optional[Iterable[str]]
-        :keyword prepared_products_data_from_broken_invocation: products data from
+        :keyword prepared_products_from_broken_invocation: products data from
             previous method invocation that has been broken by
             network error that occurred on thread pool result iteration
             (so, part of requests that have been finished successfully
             are added in this list)
-        :type prepared_products_data_from_broken_invocation: Optional[list[tuple[str, str, dict]]]
+        :type prepared_products_from_broken_invocation: Optional[list[Product]]
 
-        :return: dump products data in the ``.json`` files; return none
+        :return: dump products in the ``.json`` files; return none
         :rtype: None
         """
 
-        if not prepared_products_data_from_broken_invocation:
-            products_dump_dir = self._prepare_dir_for_products_data(url, products_dump_dir_name)
-            logger.info(f'Products data from url: {url!r} | will be saved in: {products_dump_dir!s}')
+        if not prepared_products_from_broken_invocation:
+            products_dump_dir = self._prepare_dir_for_products(url, products_dump_dir_name)
+            logger.info(f'Products from url: {url!r} | will be saved in: {products_dump_dir!s}')
             links = self._get_all_products_links(url)
-            products_data: list[tuple[str, str, dict]] = []
+            products: list[Product] = []
         else:
             if not products_dump_dir_from_broken_invocation or not left_links_for_handling_from_broken_invocation:
                 message = (
@@ -416,17 +399,17 @@ class ParserClient:
 
             products_dump_dir = products_dump_dir_from_broken_invocation
             links = left_links_for_handling_from_broken_invocation
-            products_data: list[tuple[str, str, dict]] = prepared_products_data_from_broken_invocation
+            products: list[Product] = prepared_products_from_broken_invocation
 
             links_log = '\n\t'.join(links)
             logger.info(f'Working with data from broken method invocation. Left links:\n{links_log}')
 
         logger.info('STARTING [DOWNLOADING | PARSING] PROCESS.')
-        products_data_iterator = self._fetch_products_data_with_thread_pool_executor(links, max_workers=max_workers)
+        products_iterator = self._fetch_products_with_thread_pool_executor(links, max_workers=max_workers)
 
         try:
-            for product_data in products_data_iterator:
-                products_data.append(product_data)
+            for product in products_iterator:
+                products.append(product)
         # except error that might have been raised
         # but actually waking on getting generator result (with error)
         except Exception as error:
@@ -435,16 +418,15 @@ class ParserClient:
             seconds_to_sleep = int(DEFAULT_MINUTES_TO_SLEEP_ON_ERROR * 60)
             self._sleep_with_tqdm_bar(seconds_to_sleep)
 
-            # list (``list``) of products data contains tuples (``tuple``) that contains:
-            # product url (``str``) [0], product name (``str``) [1], product data for damping (``dict``) [2]
-            handled_links = {product_data[0] for product_data in products_data}
+            handled_links = {product.original_url for product in products}
             unhandled_links = set(links) - handled_links
-            self.dump_products(
+
+            return self.dump_products(
                 url,
                 max_workers=max_workers,
                 products_dump_dir_from_broken_invocation=products_dump_dir,
                 left_links_for_handling_from_broken_invocation=unhandled_links,
-                prepared_products_data_from_broken_invocation=products_data
+                prepared_products_from_broken_invocation=products
             )
         else:
             log = (
@@ -454,7 +436,7 @@ class ParserClient:
             logger.info(log)
 
             logger.info('STARTING [DUMPING] PROCESS.')
-            self._dump_all_products_in_json(products_dump_dir, products_data)
+            self._dump_all_products_in_json(products_dump_dir, products)
             log = (
                 'Process of [dumping] has been finished SUCCESSFULLY. '
                 f'All products have been dumped. From URL: {url}.'
@@ -473,7 +455,7 @@ class ParserClient:
     @track_time
     def dump_product(self, url: str, products_dump_dir_name: Optional[str] = None) -> None:
         """
-        Dump data of one product in directory with ``.json`` file
+        Dump one product in the directory with ``.json`` file
         by url that refers on page with product info.
 
         :param url: url that refers on page with product
@@ -485,22 +467,19 @@ class ParserClient:
         :rtype: None
         """
 
-        products_dump_dir = self._prepare_dir_for_products_data(url, products_dump_dir_name)
-        logger.info(f'Product data from url: {url!r} | will be saved in: {products_dump_dir!s}')
+        products_dump_dir = self._prepare_dir_for_products(url, products_dump_dir_name)
+        logger.info(f'Product from url: {url!r} | will be saved in: {products_dump_dir!s}')
 
         logger.info('STARTING [DOWNLOADING | PARSING] PROCESS.')
         try:
-            product_data = self._get_product_data(url)
+            product_data = self._get_product(url)
         except Exception as error:
             logging.exception('Error has been occured during network requesting.', exc_info=error)
 
-            minutes_to_sleep = DEFAULT_MINUTES_TO_SLEEP_ON_ERROR
-            logger.info(f'Sleeping for {minutes_to_sleep} minute[s]...')
-            seconds_to_sleep = int(minutes_to_sleep * 60)
+            seconds_to_sleep = int(DEFAULT_MINUTES_TO_SLEEP_ON_ERROR * 60)
             self._sleep_with_tqdm_bar(seconds_to_sleep)
 
-            logger.info(f'Have woken up after {minutes_to_sleep} minute[s] of sleeping. Trying to work again...')
-            self.dump_product(url)
+            return self.dump_product(url)
         else:
             log = (
                 'Process of [downloading | parsing] has been finished SUCCESSFULLY. '
@@ -511,8 +490,8 @@ class ParserClient:
             logger.info('STARTING [DUMPING] PROCESS.')
             # to use function that dumps all products (convenient way)
             # here create list
-            product_data_in_list = [product_data]
-            self._dump_all_products_in_json(products_dump_dir, product_data_in_list)
+            product_in_list = [product_data]
+            self._dump_all_products_in_json(products_dump_dir, product_in_list)
             log = (
                 'Process of [dumping] has been finished SUCCESSFULLY. '
                 f'Product has been dumped. From URL: {url}.'
