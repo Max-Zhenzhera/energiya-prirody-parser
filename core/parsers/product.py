@@ -34,12 +34,16 @@ class ProductParser(BaseParser):
     .. property:: user_content_images_links(self) -> list[str]
     .. property:: all_images_links(self) -> list[str]
     .. property:: _user_content_section(self) -> bs4.Tag
+    .. property:: user_content_html(self) -> str
     .. property:: user_content(self) -> str
     .. property:: characteristics(self) -> dict
+    .. property:: specification_links(self) -> list[str]
 
     .. staticmethod:: _parse_table(table: bs4.Tag) -> dict
         Return ``dict`` with data of the table
 
+    .. method:: replace_internal_links_with_links_text(self) -> None
+        Replace all internal links (html) just on the text content of the internal links
     .. method:: get_data(self) -> dict
         Return ``dict`` with the main product data
     """
@@ -53,6 +57,7 @@ class ProductParser(BaseParser):
         super().__init__(original_url, html_text)
 
         self._soup = bs4.BeautifulSoup(html_text, 'html.parser')
+        self._replace_internal_links_with_links_text()
 
     def __repr__(self) -> str:
         return f'{self.__class__.__name__}(title={self.title}, original_url={self.original_url})'
@@ -148,7 +153,7 @@ class ProductParser(BaseParser):
         """ Get links on the extra product images """
         links_container = self._soup.find('div', {'class': 'b-extra-photos'})
         links_html = links_container.find_all('a', {'class': 'b-extra-photos__item'})
-        extra_images_links = [link.get('href') for link in links_html]
+        extra_images_links = [link.get('href') for link in links_html if link.get('href')]
 
         return extra_images_links
 
@@ -156,7 +161,7 @@ class ProductParser(BaseParser):
     def user_content_images_links(self) -> list[str]:
         """ Get links on the images in user content section """
         images_html = self._user_content_section.find_all('img')
-        user_content_images_links = [image.get('src') for image in images_html]
+        user_content_images_links = [image.get('src') for image in images_html if image.get('src')]
 
         return user_content_images_links
 
@@ -169,18 +174,26 @@ class ProductParser(BaseParser):
 
     @property
     def _user_content_section(self) -> bs4.Tag:
+        """ Get ``bs4`` tag of the user content section """
         user_content_section = self._soup.find('div', {'class': 'b-user-content'})
 
         return user_content_section
 
     @property
+    def user_content_html(self) -> str:
+        """ Get html of the user content section """
+        user_content_html = self._user_content_section.prettify()
+
+        return user_content_html
+
+    @property
     def user_content(self) -> str:
         """ Get product section with user content """
-        # user_content = self._user_content_section.text
+        user_content = self._user_content_section.text
 
         # temporarily
-        user_content_html = self._user_content_section.find_all('p', limit=1)
-        user_content = '\n'.join(p.text for p in user_content_html)
+        # user_content_html = self._user_content_section.find_all('p', limit=1)
+        # user_content = '\n'.join(p.text for p in user_content_html)
 
         return user_content
 
@@ -192,6 +205,23 @@ class ProductParser(BaseParser):
 
         return characteristics
 
+    @property
+    def specification_links(self) -> list[str]:
+        """ Get product specification links """
+        specification_links_html = self._soup.find_all('a', {'class': 'b-spec-list__link'})
+        specification_links = [specification_link.get('href') for specification_link in specification_links_html]
+
+        return specification_links
+
+    def _replace_internal_links_with_links_text(self) -> None:
+        """ Replace all internal links (links on other website resources) with links text """
+        user_content_links_html = self._user_content_section.find_all('a')
+
+        user_content_link_html: bs4.Tag
+        for user_content_link_html in user_content_links_html:
+            if user_content_link_html.get('href').startswith('https://energiya-prirody.prom.ua/'):
+                user_content_link_html.replace_with(user_content_link_html.text)
+
     def get_data(self) -> dict:
         """ Get ``dict`` of main product data """
         data = {
@@ -202,8 +232,10 @@ class ProductParser(BaseParser):
             'extra_images': self.extra_images_links,
             'user_content_images_links': self.user_content_images_links,
             'all_images_links': self.all_images_links,
+            'user_content_html': self.user_content_html,
             'user_content': self.user_content,
             'characteristics': self.characteristics,
+            'specification_links': self.specification_links
         }
 
         return data
