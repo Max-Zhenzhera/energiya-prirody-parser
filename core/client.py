@@ -198,6 +198,7 @@ class ParserClient:
     def _get_products_links(self, url: str) -> list[str]:
         """
         Get all links on products.
+        With considering of pages.
 
         :param url: url with assortment of products
         :type url: str
@@ -206,28 +207,61 @@ class ParserClient:
         :rtype: list[str]
         """
 
-        try:
-            response = self._client.get(url)
-        except httpx.HTTPError as error:
-            if isinstance(error, httpx.ReadTimeout):
-                logging.exception('Error has been occured during network interacting (read timeout).')
-            else:
-                logging.exception('Error has been occured during network interacting.', exc_info=error)
-            seconds_to_sleep = int(DEFAULT_MINUTES_TO_SLEEP_ON_NETWORK_ERROR_IN_FUNCTION * 60)
-            self._sleep_with_tqdm_bar(seconds_to_sleep)
-            self._get_products_links(url)
+        all_links = []
+        is_any_unhandled_page = True
+        page_number = 1
+
+        if not url.endswith('/'):
+            url_pattern = url + '/'
         else:
-            logger.info(f'Loaded page with assortment of products with url: {url!r}')
+            url_pattern = url
 
-            response_text = response.text
+        while is_any_unhandled_page:
+            url = f'{url_pattern}page_{page_number}'
 
-            parser = ProductsAssortmentParser(url, response_text)
-            links = parser.links
+            try:
+                response = self._client.get(url)
+            except httpx.HTTPError as error:
+                if isinstance(error, httpx.ReadTimeout):
+                    logging.exception('Error has been occured during network interacting (read timeout).')
+                else:
+                    logging.exception('Error has been occured during network interacting.', exc_info=error)
+                seconds_to_sleep = int(DEFAULT_MINUTES_TO_SLEEP_ON_NETWORK_ERROR_IN_FUNCTION * 60)
+                self._sleep_with_tqdm_bar(seconds_to_sleep)
 
-            links_log = ''.join(f'\n\t{link}' for link in links)
-            logger.info(f'Have been found {len(links)} links on the page.\nList of the links:{links_log}')
+                return self._get_products_links(url)
+            else:
+                # if response length of response history is more than 2
+                # it means that current page is redirected on 1-st page
+                if len(response.history) > 1:
+                    is_any_unhandled_page = False
 
-            return links
+                    logger.info(f'[PAGES] The last page has been parsed. Pages quantity: {page_number}.')
+                else:
+                    logger.info(f'Loaded [{page_number}] page with assortment of products with url: {url!r}')
+
+                    response_text = response.text
+                    parser = ProductsAssortmentParser(url, response_text)
+                    page_links = parser.links
+
+                    links_log = ''.join(f'\n\t{link}' for link in page_links)
+                    log = (
+                        f'Have been found {len(page_links)} links on the [{page_number}] assortment page.'
+                        f'\nList of the links:{links_log}'
+                    )
+                    logger.info(log)
+
+                    all_links.extend(page_links)
+                    page_number += 1
+
+        links_log = ''.join(f'\n\t{link}' for link in all_links)
+        log = (
+            f'Have been found {len(all_links)} links of all assortment pages.'
+            f'\nList of the links:{links_log}'
+        )
+        logger.info(log)
+
+        return all_links
 
     def _get_product(self, url: str) -> Product:
         """
