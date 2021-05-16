@@ -6,10 +6,12 @@ Contains products assortment parser.
 """
 
 import logging
+from urllib.parse import urljoin
 
 import bs4
 
 from .base import BaseParser
+from ..settings import WEBSITE_HOMEPAGE
 
 
 __all__ = ['ProductsAssortmentParser']
@@ -60,6 +62,6 @@ class ProductsAssortmentParser(BaseParser):
     def links(self) -> list[str]:
         """ Get links on products web pages """
         links_html = self._soup.find_all('a', {'class': 'b-product-gallery__title'})
-        links = [link.get('href') for link in links_html]
+        links = [urljoin(WEBSITE_HOMEPAGE, link.get('href')) for link in links_html]
 
         return links
