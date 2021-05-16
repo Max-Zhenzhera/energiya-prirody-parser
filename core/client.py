@@ -14,7 +14,8 @@ from concurrent.futures import thread
 from typing import (
     Iterable,
     Iterator,
-    Optional
+    Optional,
+    Union
 )
 from urllib.parse import urlparse
 
@@ -27,13 +28,15 @@ from tqdm.contrib.concurrent import thread_map
 
 from .parsers import (
     ProductParser,
-    ProductsAssortmentParser
+    ProductsAssortmentParser,
+    ProductsGroupsParser
 )
 from .settings import (
     DEFAULT_DUMP_DIR,
-    DEFAULT_CLIENT_HEADERS,
+    DEFAULT_CLIENT_ARGUMENTS,
     DEFAULT_MINUTES_TO_SLEEP_ON_NETWORK_ERROR_IN_FUNCTION,
     DEFAULT_MINUTES_TO_SLEEP_ON_ERROR,
+    DEFAULT_MINUTES_TO_BREAK_UP_BETWEEN_GROUP_DUMPING,
     LOGGING_CONFIG_PATH
 )
 from .types import Product
@@ -57,33 +60,38 @@ class ParserClient:
 
     ..property:: dump_dir(self) -> pathlib.Path
 
+    .. staticmethod:: _make_string_valid_for_path(string: str) -> str
+        Make string valid for usage in paths
     .. staticmethod:: _sleep_with_tqdm_bar(seconds: int) -> None
         Sleep with ``tqdm`` progress bar
-    .. staticmethod:: _dump_product_in_json(products_dump_dir: pathlib.Path, product: Product, *,
+
+    .. method:: _dump_product_in_json(self, products_dump_dir: pathlib.Path, product: Product, *,
             prefix: Optional[str] = '') -> pathlib.Path
         Dump one product in json
-
     .. method:: _dump_all_products_in_json(self, products_dump_dir: pathlib.Path, products: list[Product]) -> None
         Dump all products in json
     .. method:: _get_products_links(self, url: str) -> list[str]
         Get all links on products from url that refers on page with products assortment
     .. method:: _get_product(self, url: str) -> Product
         Get product instance
-    .. method:: _prepare_dir_for_products(self, url: str, products_dump_dir_name: Optional[str] = None
-            ) -> pathlib.Path:
+    .. method:: _prepare_dir_for_products(self, url: str,
+            products_dump_dir_name: Optional[Union[str, pathlib.Path]] = None) -> pathlib.Path:
         Prepare dir for products dump
     .. method:: _fetch_products_with_thread_pool_executor(self, links: Iterable[str], *,
             max_workers: Optional[int] = None) -> Iterator[Product]
         Fetch iterator of products (with ``_get_product`` results executed by thread pool)
-    .. method:: dump_products(self, url: str, products_dump_dir_name: Optional[str] = None, *,
+    .. method:: dump_products(self, url: str, products_dump_dir_name: Optional[Union[str, pathlib.Path]] = None, *,
             max_workers: Optional[int] = None,
             products_dump_dir_from_broken_invocation: Optional[pathlib.Path] = None,
             left_links_for_handling_from_broken_invocation: Optional[Iterable[str]] = None,
             prepared_products_from_broken_invocation: Optional[list[Product]] = None
             ) -> None
         Dump all products by url that refers on page with products assortment
-    .. method:: dump_product(self, url: str, products_dump_dir_name: Optional[str] = None) -> None
+    .. method:: dump_product(self, url: str, products_dump_dir_name: Optional[Union[str, pathlib.Path]] = None) -> None
         Dump one product
+    .. method:: dump_group(self, url: str, dir_name: Optional[Union[str, pathlib.Path]] = None,
+                   *, max_workers: Optional[int] = None) -> None
+        Dump group products with subgroups crawling
     .. method:: manager(cls, *args, **kwargs) -> 'ParserClient'
         Context manager for parser client
     .. method:: close(self) -> None
@@ -115,7 +123,7 @@ class ParserClient:
             logger.debug(f'Dump dir has been created. Path: {self._dump_dir!s}')
 
         if client is None:
-            self._client = httpx.Client(headers=DEFAULT_CLIENT_HEADERS)
+            self._client = httpx.Client(**DEFAULT_CLIENT_ARGUMENTS)
             logger.debug('Http client has been created.')
         else:
             self._client = client
@@ -128,6 +136,35 @@ class ParserClient:
     def dump_dir(self) -> pathlib.Path:
         """ Get dump dir """
         return self._dump_dir
+
+    @staticmethod
+    def _make_string_valid_for_path(string: str) -> str:
+        """
+        Make string valid for usage in paths.
+
+        :param string: string to be translated
+        :type string: str
+
+        :return: translated string
+        :rtype: str
+        """
+
+        translate_table = {
+            ord('\\'): '-',
+            ord('/'): '-',
+            ord('\''): None,
+            ord('\"'): None,
+            ord('<'): None,
+            ord('>'): None,
+            ord('*'): None,
+            ord('?'): None,
+            ord(','): None,
+            ord('.'): None
+        }
+
+        translated_string = string.translate(translate_table)
+
+        return translated_string
 
     @staticmethod
     def _sleep_with_tqdm_bar(seconds: int) -> None:
@@ -145,8 +182,7 @@ class ParserClient:
             time.sleep(1)
         logger.info(f'Have woken up after {seconds} second[s] of sleeping. Trying to work again...')
 
-    @staticmethod
-    def _dump_product_in_json(products_dump_dir: pathlib.Path, product: Product,
+    def _dump_product_in_json(self, products_dump_dir: pathlib.Path, product: Product,
                               *,
                               prefix: Optional[str] = ''
                               ) -> pathlib.Path:
@@ -165,9 +201,10 @@ class ParserClient:
         """
 
         file_extension = 'json'
-        valid_product_title = product.title.replace('/', '-').replace('\\', '-').replace('\'', '').replace('\"', '')
+        valid_product_title = self._make_string_valid_for_path(product.title)
         filename = f'{prefix}{valid_product_title}.{file_extension}'
         filepath = products_dump_dir / filename
+
         with open(filepath, 'w', encoding='utf-8') as file:
             json.dump(product.data, file, ensure_ascii=False, indent=4)
 
@@ -223,7 +260,7 @@ class ParserClient:
                 response = self._client.get(url)
             except httpx.HTTPError as error:
                 if isinstance(error, httpx.ReadTimeout):
-                    logging.exception('Error has been occured during network interacting (read timeout).')
+                    logging.error('Error has been occured during network interacting (read timeout).')
                 else:
                     logging.exception('Error has been occured during network interacting.', exc_info=error)
                 seconds_to_sleep = int(DEFAULT_MINUTES_TO_SLEEP_ON_NETWORK_ERROR_IN_FUNCTION * 60)
@@ -278,7 +315,7 @@ class ParserClient:
             response = self._client.get(url)
         except httpx.HTTPError as error:
             if isinstance(error, httpx.ReadTimeout):
-                logging.exception('Error has been occured during network interacting (read timeout).')
+                logging.error('Error has been occured during network interacting (read timeout).')
             else:
                 logging.exception('Error has been occured during network interacting.', exc_info=error)
             seconds_to_sleep = int(DEFAULT_MINUTES_TO_SLEEP_ON_NETWORK_ERROR_IN_FUNCTION * 60)
@@ -296,15 +333,16 @@ class ParserClient:
 
             return product
 
-    def _prepare_dir_for_products(self, url: str, products_dump_dir_name: Optional[str] = None) -> pathlib.Path:
+    def _prepare_dir_for_products(self, url: str, products_dump_dir_name: Optional[Union[str, pathlib.Path]] = None
+                                  ) -> pathlib.Path:
         """
         Prepare directory for future products
         and return path to it.
 
         :param url: used for generating directory name if passed directory name is empty
         :type url: str
-        :param products_dump_dir_name: directory name for dump of products data
-        :type products_dump_dir_name: Optional[str]
+        :param products_dump_dir_name: directory name or relative path to directory for dump of products data
+        :type products_dump_dir_name: Optional[Union[str, pathlib.Path]]
 
         :return: path to the directory for products data
         :rtype: pathlib.Path
@@ -376,7 +414,7 @@ class ParserClient:
         # )
 
     @track_time
-    def dump_products(self, url: str, products_dump_dir_name: Optional[str] = None,
+    def dump_products(self, url: str, products_dump_dir_name: Optional[Union[str, pathlib.Path]] = None,
                       *,
                       max_workers: Optional[int] = None,
                       products_dump_dir_from_broken_invocation: Optional[pathlib.Path] = None,
@@ -395,8 +433,8 @@ class ParserClient:
 
         :param url: url that refers on page with product assortment
         :type url: str
-        :param products_dump_dir_name: directory name for dump of products data
-        :type products_dump_dir_name: Optional[str]
+        :param products_dump_dir_name: directory name or relative path to directory for dump of products data
+        :type products_dump_dir_name: Optional[Union[str, pathlib.Path]]
         :keyword max_workers: num of the max workers in pool
         :type max_workers: Optional[int]
         :keyword products_dump_dir_from_broken_invocation: filepath to products dump dir
@@ -542,6 +580,71 @@ class ParserClient:
                 )
             )
             logger.info(log)
+
+    @track_time
+    def dump_group(self, url: str, dir_name: Optional[Union[str, pathlib.Path]] = None,
+                   *,
+                   max_workers: Optional[int] = None
+                   ) -> None:
+        """
+        Dump group products with subgroups crawling.
+
+        :param url: url to group web page
+        :type url: str
+        :param dir_name: dir name for the group dump
+        :type dir_name: Optional[Union[str, pathlib.Path]]
+        :keyword max_workers: quantity of workers in the thread pool on group products crawling
+        :type max_workers: Optional[int]
+
+        :return: None
+        :rtype: None
+        """
+
+        try:
+            response = self._client.get(url)
+        except httpx.HTTPError as error:
+            if isinstance(error, httpx.ReadTimeout):
+                logger.error('Error has been occured during network interacting (read timeout).')
+            else:
+                logger.exception('Error has been occured during network interacting.', exc_info=error)
+            seconds_to_sleep = int(DEFAULT_MINUTES_TO_SLEEP_ON_NETWORK_ERROR_IN_FUNCTION * 60)
+            self._sleep_with_tqdm_bar(seconds_to_sleep)
+
+            self.dump_group(url, dir_name)
+        else:
+            logger.info(f'Loaded page with product group. URL: {url!r}')
+
+            response_text = response.text
+
+            parser = ProductsGroupsParser(url, response_text)
+
+            group_name = parser.group
+            valid_group_name = self._make_string_valid_for_path(group_name)
+            subgroups_links = parser.subgroups_links
+
+            if subgroups_links:
+                links_log = ''.join(f'\n\t{link}' for link in subgroups_links)
+                log = (
+                    f'Have been found {len(subgroups_links)} links of subgroups.'
+                    f'\nList of the links:{links_log}'
+                )
+                logger.info(log)
+
+                for subgroups_link in subgroups_links:
+                    dir_name = pathlib.Path(valid_group_name) if dir_name is None else dir_name / valid_group_name
+
+                    self.dump_group(subgroups_link)
+            else:
+                # if group is last-level of deep [~ for the marking]
+                m_valid_group_name = f'~{valid_group_name}'
+                dir_name = pathlib.Path(m_valid_group_name) if dir_name is None else dir_name / m_valid_group_name
+
+                logger.info('Group is last level of deep. Going to products section...')
+                self.dump_products(url, products_dump_dir_name=dir_name, max_workers=max_workers)
+                logger.info(f'Group: {valid_group_name} - products is finished. Doing break...')
+
+                seconds_to_sleep = int(DEFAULT_MINUTES_TO_BREAK_UP_BETWEEN_GROUP_DUMPING * 60)
+                self._sleep_with_tqdm_bar(seconds_to_sleep)
 
     @classmethod
     @contextlib.contextmanager
