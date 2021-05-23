@@ -7,7 +7,10 @@ Contains main function.
 # setup logging for entire project--------------------------------------------------------------------------------------
 import logging
 
-from .settings import LOGGING_CONFIG_PATH
+from .settings import (
+    LOGGING_CONFIG_PATH,
+    WEBSITE_HOMEPAGE
+)
 from .utils.logging_ import setup_logging
 
 
@@ -25,9 +28,8 @@ def main() -> None:
     Executable in entry point (__main__.py).
     """
 
+    max_workers = 1
+
     client: ParserClient
     with ParserClient.manager() as client:
-        client.dump_products(
-            'https://energiya-prirody.prom.ua/g19072746-avtonomnye-solnechnye-elektrostantsii',
-            max_workers=3
-        )
+        client.dump_group(WEBSITE_HOMEPAGE, max_workers=max_workers)

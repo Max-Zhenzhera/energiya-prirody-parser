@@ -8,6 +8,7 @@ Contains convenient client for product parser.
 import contextlib
 import json
 import logging
+import os
 import pathlib
 import time
 from concurrent.futures import thread
@@ -37,6 +38,7 @@ from .settings import (
     DEFAULT_MINUTES_TO_SLEEP_ON_NETWORK_ERROR_IN_FUNCTION,
     DEFAULT_MINUTES_TO_SLEEP_ON_ERROR,
     DEFAULT_MINUTES_TO_BREAK_UP_BETWEEN_GROUP_DUMPING,
+    DEFAULT_MINUTES_SLEEP_AFTER_REQUEST,
     LOGGING_CONFIG_PATH
 )
 from .types import Product
@@ -57,45 +59,6 @@ logger = logging.getLogger(__name__)
 class ParserClient:
     """
     Implements client for product parser.
-
-    ..property:: dump_dir(self) -> pathlib.Path
-
-    .. staticmethod:: _make_string_valid_for_path(string: str) -> str
-        Make string valid for usage in paths
-    .. staticmethod:: _sleep_with_tqdm_bar(seconds: int) -> None
-        Sleep with ``tqdm`` progress bar
-
-    .. method:: _dump_product_in_json(self, products_dump_dir: pathlib.Path, product: Product, *,
-            prefix: Optional[str] = '') -> pathlib.Path
-        Dump one product in json
-    .. method:: _dump_all_products_in_json(self, products_dump_dir: pathlib.Path, products: list[Product]) -> None
-        Dump all products in json
-    .. method:: _get_products_links(self, url: str) -> list[str]
-        Get all links on products from url that refers on page with products assortment
-    .. method:: _get_product(self, url: str) -> Product
-        Get product instance
-    .. method:: _prepare_dir_for_products(self, url: str,
-            products_dump_dir_name: Optional[Union[str, pathlib.Path]] = None) -> pathlib.Path:
-        Prepare dir for products dump
-    .. method:: _fetch_products_with_thread_pool_executor(self, links: Iterable[str], *,
-            max_workers: Optional[int] = None) -> Iterator[Product]
-        Fetch iterator of products (with ``_get_product`` results executed by thread pool)
-    .. method:: dump_products(self, url: str, products_dump_dir_name: Optional[Union[str, pathlib.Path]] = None, *,
-            max_workers: Optional[int] = None,
-            products_dump_dir_from_broken_invocation: Optional[pathlib.Path] = None,
-            left_links_for_handling_from_broken_invocation: Optional[Iterable[str]] = None,
-            prepared_products_from_broken_invocation: Optional[list[Product]] = None
-            ) -> None
-        Dump all products by url that refers on page with products assortment
-    .. method:: dump_product(self, url: str, products_dump_dir_name: Optional[Union[str, pathlib.Path]] = None) -> None
-        Dump one product
-    .. method:: dump_group(self, url: str, dir_name: Optional[Union[str, pathlib.Path]] = None,
-                   *, max_workers: Optional[int] = None) -> None
-        Dump group products with subgroups crawling
-    .. method:: manager(cls, *args, **kwargs) -> 'ParserClient'
-        Context manager for parser client
-    .. method:: close(self) -> None
-        Close parser client
     """
 
     def __init__(self, dump_dir: Optional[str] = None, client: Optional[httpx.Client] = None):
@@ -130,7 +93,7 @@ class ParserClient:
             logger.debug('Passed http client has been set.')
 
     def __repr__(self) -> str:
-        return f'ParserClient(dump_dir={self._dump_dir}, client={self._client})'
+        return f'{self.__class__.__name__}(dump_dir={self._dump_dir}, client={self._client})'
 
     @property
     def dump_dir(self) -> pathlib.Path:
@@ -205,8 +168,26 @@ class ParserClient:
         filename = f'{prefix}{valid_product_title}.{file_extension}'
         filepath = products_dump_dir / filename
 
-        with open(filepath, 'w', encoding='utf-8') as file:
-            json.dump(product.data, file, ensure_ascii=False, indent=4)
+        try:
+            with open(filepath, 'w', encoding='utf-8') as file:
+                json.dump(product.data, file, ensure_ascii=False, indent=4)
+        except FileNotFoundError as error:
+            logging.exception('Error on product dumping!', exc_info=error)
+
+            if not products_dump_dir.exists():
+                products_dump_dir.mkdir(parents=True, exist_ok=True)
+
+            os.chdir(products_dump_dir)
+
+            try:
+                with open(filename, 'w', encoding='utf-8') as file:
+                    json.dump(product.data, file, ensure_ascii=False, indent=4)
+            except FileNotFoundError as error:
+                logging.exception('Error on product dumping!', exc_info=error)
+
+                filename_ = f'{prefix}.{file_extension}'
+                with open(filename_, 'w', encoding='utf-8') as file:
+                    json.dump(product.data, file, ensure_ascii=False, indent=4)
 
         return filepath
 
@@ -254,6 +235,9 @@ class ParserClient:
             url_pattern = url
 
         while is_any_unhandled_page:
+            seconds_to_sleep = int(DEFAULT_MINUTES_SLEEP_AFTER_REQUEST * 60)
+            self._sleep_with_tqdm_bar(seconds_to_sleep)
+
             url = f'{url_pattern}page_{page_number}'
 
             try:
@@ -263,6 +247,7 @@ class ParserClient:
                     logging.error('Error has been occured during network interacting (read timeout).')
                 else:
                     logging.exception('Error has been occured during network interacting.', exc_info=error)
+
                 seconds_to_sleep = int(DEFAULT_MINUTES_TO_SLEEP_ON_NETWORK_ERROR_IN_FUNCTION * 60)
                 self._sleep_with_tqdm_bar(seconds_to_sleep)
 
@@ -330,6 +315,9 @@ class ParserClient:
             parser = ProductParser(url, response_text)
             product = Product(parser)
             logger.info(f'Parsed product with name: {product.title}. From URL: {url}')
+
+            seconds_to_sleep = int(DEFAULT_MINUTES_SLEEP_AFTER_REQUEST * 60)
+            self._sleep_with_tqdm_bar(seconds_to_sleep)
 
             return product
 
@@ -600,6 +588,9 @@ class ParserClient:
         :rtype: None
         """
 
+        seconds_to_sleep = int(DEFAULT_MINUTES_SLEEP_AFTER_REQUEST * 60)
+        self._sleep_with_tqdm_bar(seconds_to_sleep)
+
         try:
             response = self._client.get(url)
         except httpx.HTTPError as error:
@@ -607,6 +598,7 @@ class ParserClient:
                 logger.error('Error has been occured during network interacting (read timeout).')
             else:
                 logger.exception('Error has been occured during network interacting.', exc_info=error)
+
             seconds_to_sleep = int(DEFAULT_MINUTES_TO_SLEEP_ON_NETWORK_ERROR_IN_FUNCTION * 60)
             self._sleep_with_tqdm_bar(seconds_to_sleep)
 
@@ -636,8 +628,10 @@ class ParserClient:
                     self.dump_group(subgroups_link)
             else:
                 # if group is last-level of deep [~ for the marking]
-                m_valid_group_name = f'~{valid_group_name}'
-                dir_name = pathlib.Path(m_valid_group_name) if dir_name is None else dir_name / m_valid_group_name
+                marked_valid_group_name = f'~{valid_group_name}'
+                dir_name = pathlib.Path(
+                    marked_valid_group_name
+                ) if dir_name is None else dir_name / marked_valid_group_name
 
                 logger.info('Group is last level of deep. Going to products section...')
                 self.dump_products(url, products_dump_dir_name=dir_name, max_workers=max_workers)
