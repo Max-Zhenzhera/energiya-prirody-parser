@@ -23,29 +23,6 @@ logger = logging.getLogger(__name__)
 class ProductParser(BaseParser):
     """
     Implements parser for product page.
-
-    .. attr:: _soup
-
-    .. property:: soup(self) -> bs4.BeautifulSoup
-    .. property:: title(self) -> str
-    .. property:: price(self) -> str
-    .. property:: image_link(self) -> str
-    .. property:: extra_images_links(self) -> list[str]
-    .. property:: user_content_images_links(self) -> list[str]
-    .. property:: all_images_links(self) -> list[str]
-    .. property:: _user_content_section(self) -> bs4.Tag
-    .. property:: user_content_html(self) -> str
-    .. property:: user_content(self) -> str
-    .. property:: characteristics(self) -> dict
-    .. property:: specification_links(self) -> list[str]
-
-    .. staticmethod:: _parse_table(table: bs4.Tag) -> dict
-        Return ``dict`` with data of the table
-
-    .. method:: replace_internal_links_with_links_text(self) -> None
-        Replace all internal links (html) just on the text content of the internal links
-    .. method:: get_data(self) -> dict
-        Return ``dict`` with the main product data
     """
 
     def __init__(self, original_url: str, html_text: str):
@@ -75,6 +52,9 @@ class ProductParser(BaseParser):
         :return: structured table info
         :rtype: dict
         """
+
+        if table is None:
+            return {}
 
         rows = table.find_all('tr')
 
@@ -182,14 +162,14 @@ class ProductParser(BaseParser):
     @property
     def user_content_html(self) -> str:
         """ Get html of the user content section """
-        user_content_html = self._user_content_section.prettify()
+        user_content_html = self._user_content_section.prettify() if self._user_content_section is not None else ''
 
         return user_content_html
 
     @property
     def user_content(self) -> str:
         """ Get product section with user content """
-        user_content = self._user_content_section.text
+        user_content = self._user_content_section.text if self._user_content_section is not None else ''
 
         # temporarily
         # user_content_html = self._user_content_section.find_all('p', limit=1)

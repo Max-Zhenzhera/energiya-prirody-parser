@@ -8,7 +8,6 @@ Contains convenient client for product parser.
 import contextlib
 import json
 import logging
-import os
 import pathlib
 import time
 from concurrent.futures import thread
@@ -170,26 +169,8 @@ class ParserClient:
         filename = f'{prefix}{valid_product_title}.{file_extension}'
         filepath = products_dump_dir / filename
 
-        try:
-            with open(filepath, 'w', encoding='utf-8') as file:
-                json.dump(product.data, file, ensure_ascii=False, indent=4)
-        except FileNotFoundError as error:
-            logging.exception('Error on product dumping!', exc_info=error)
-
-            if not products_dump_dir.exists():
-                products_dump_dir.mkdir(parents=True, exist_ok=True)
-
-            os.chdir(products_dump_dir)
-
-            try:
-                with open(filename, 'w', encoding='utf-8') as file:
-                    json.dump(product.data, file, ensure_ascii=False, indent=4)
-            except FileNotFoundError as error:
-                logging.exception('Error on product dumping!', exc_info=error)
-
-                filename_ = f'{prefix}.{file_extension}'
-                with open(filename_, 'w', encoding='utf-8') as file:
-                    json.dump(product.data, file, ensure_ascii=False, indent=4)
+        with open(filepath, 'w', encoding='utf-8') as file:
+            json.dump(product.data, file, ensure_ascii=False, indent=4)
 
         return filepath
 
@@ -260,7 +241,7 @@ class ParserClient:
                 if len(response.history) > 1:
                     is_any_unhandled_page = False
 
-                    logger.info(f'[PAGES] The last page has been parsed. Pages quantity: {page_number}.')
+                    logger.info(f'[PAGES] The last page has been parsed. Pages quantity: {page_number - 1}.')
                 else:
                     logger.info(f'Loaded [{page_number}] page with assortment of products with url: {url!r}')
 
@@ -464,12 +445,7 @@ class ParserClient:
         :rtype: None
         """
 
-        if not prepared_products_from_broken_invocation:
-            products_dump_dir = self._prepare_dir_for_products(url, products_dump_dir_name)
-            logger.info(f'Products from url: {url!r} | will be saved in: {products_dump_dir!s}')
-            links = self._get_products_links(url)
-            products: list[Product] = []
-        else:
+        if prepared_products_from_broken_invocation:
             if not products_dump_dir_from_broken_invocation or not left_links_for_handling_from_broken_invocation:
                 message = (
                     'Data from broken invocation are not complected. '
@@ -484,6 +460,11 @@ class ParserClient:
 
             links_log = '\n\t'.join(links)
             logger.info(f'Working with data from broken method invocation. Left links:\n{links_log}')
+        else:
+            products_dump_dir = self._prepare_dir_for_products(url, products_dump_dir_name)
+            logger.info(f'Products from url: {url!r} | will be saved in: {products_dump_dir!s}')
+            links = self._get_products_links(url)
+            products: list[Product] = []
 
         logger.info('STARTING [DOWNLOADING | PARSING] PROCESS.')
         if not max_workers or max_workers == 1:
@@ -493,8 +474,11 @@ class ParserClient:
             products_iterator = self._fetch_products_with_thread_pool_executor(links, max_workers=max_workers)
 
         try:
-            for product in products_iterator:
-                products.append(product)
+            with tqdm(total=len(links)) as progress_bar:
+                for product in products_iterator:
+                    products.append(product)
+
+                    progress_bar.update(1)
         # except error that might have been raised
         # but actually waking on getting generator result (with error)
         except Exception as error:
@@ -646,18 +630,17 @@ class ParserClient:
                 logger.info(log)
 
                 for subgroups_link in subgroups_links:
-                    dir_name = pathlib.Path(valid_group_name) if dir_name is None else dir_name / valid_group_name
+                    group_dir_name = pathlib.Path(valid_group_name) if dir_name is None else dir_name / valid_group_name
 
-                    self.dump_group(subgroups_link, max_workers=max_workers)
+                    self.dump_group(subgroups_link, dir_name=group_dir_name, max_workers=max_workers)
             else:
                 # if group is last-level of deep [~ for the marking]
                 marked_valid_group_name = f'~{valid_group_name}'
-                dir_name = pathlib.Path(
-                    marked_valid_group_name
-                ) if dir_name is None else dir_name / marked_valid_group_name
+                group_dir_name = pathlib.Path(
+                    marked_valid_group_name) if dir_name is None else dir_name.parent / marked_valid_group_name
 
                 logger.info('Group is last level of deep. Going to products section...')
-                self.dump_products(url, products_dump_dir_name=dir_name, max_workers=max_workers)
+                self.dump_products(url, products_dump_dir_name=group_dir_name, max_workers=max_workers)
                 logger.info(f'Group: {valid_group_name} - products is finished. Doing break...')
 
                 seconds_to_sleep = int(DEFAULT_MINUTES_TO_BREAK_UP_BETWEEN_GROUP_DUMPING * 60)
