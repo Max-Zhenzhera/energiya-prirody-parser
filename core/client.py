@@ -13,6 +13,8 @@ import pathlib
 import time
 from concurrent.futures import thread
 from typing import (
+    Any,
+    Generator,
     Iterable,
     Iterator,
     Optional,
@@ -401,6 +403,23 @@ class ParserClient:
         #     **thread_pool_params
         # )
 
+    def _fetch_products_with_single_requests(self, links: Iterable[str]) ->  Generator[Product, Any, None]:
+        """
+        Fetch generator of the products.
+
+        Returned iterator of the results of ``_get_product`` method.
+
+        :param links: links that refer on the product web pages
+        :type links: Iterable[str]
+
+        :return: generator of products
+        :rtype: Generator[Product]
+        """
+
+        products_iterator = (self._get_product(url) for url in links)
+
+        return products_iterator
+
     @track_time
     def dump_products(self, url: str, products_dump_dir_name: Optional[Union[str, pathlib.Path]] = None,
                       *,
@@ -467,7 +486,11 @@ class ParserClient:
             logger.info(f'Working with data from broken method invocation. Left links:\n{links_log}')
 
         logger.info('STARTING [DOWNLOADING | PARSING] PROCESS.')
-        products_iterator = self._fetch_products_with_thread_pool_executor(links, max_workers=max_workers)
+        if not max_workers or max_workers == 1:
+            # actually it is a generator
+            products_iterator = self._fetch_products_with_single_requests(links)
+        else:
+            products_iterator = self._fetch_products_with_thread_pool_executor(links, max_workers=max_workers)
 
         try:
             for product in products_iterator:
@@ -625,7 +648,7 @@ class ParserClient:
                 for subgroups_link in subgroups_links:
                     dir_name = pathlib.Path(valid_group_name) if dir_name is None else dir_name / valid_group_name
 
-                    self.dump_group(subgroups_link)
+                    self.dump_group(subgroups_link, max_workers=max_workers)
             else:
                 # if group is last-level of deep [~ for the marking]
                 marked_valid_group_name = f'~{valid_group_name}'
