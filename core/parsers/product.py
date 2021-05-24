@@ -171,10 +171,6 @@ class ProductParser(BaseParser):
         """ Get product section with user content """
         user_content = self._user_content_section.text if self._user_content_section is not None else ''
 
-        # temporarily
-        # user_content_html = self._user_content_section.find_all('p', limit=1)
-        # user_content = '\n'.join(p.text for p in user_content_html)
-
         return user_content
 
     @property
@@ -204,18 +200,50 @@ class ProductParser(BaseParser):
 
     def get_data(self) -> dict:
         """ Get ``dict`` of main product data """
-        data = {
-            'original_url': self.original_url,
-            'title': self.title,
-            'price': self.price,
-            'image': self.image_link,
-            'extra_images': self.extra_images_links,
-            'user_content_images_links': self.user_content_images_links,
-            'all_images_links': self.all_images_links,
-            'user_content_html': self.user_content_html,
-            'user_content': self.user_content,
-            'characteristics': self.characteristics,
-            'specification_links': self.specification_links
-        }
+        # data = {
+        #     'original_url': self.original_url,
+        #     'title': self.title,
+        #     'price': self.price,
+        #     'image': self.image_link,
+        #     'extra_images': self.extra_images_links,
+        #     'user_content_images_links': self.user_content_images_links,
+        #     'all_images_links': self.all_images_links,
+        #     'user_content_html': self.user_content_html,
+        #     'user_content': self.user_content,
+        #     'characteristics': self.characteristics,
+        #     'specification_links': self.specification_links
+        # }
+
+        # move to manual getting of the result to catch errors in try-except block
+        # if error has been occured on parsing
+
+        attributes_names = [
+            # (attribute_name_to_set, attribute_name_to_get)
+            # (name of the property in dump, name of the property in class)
+            ('original_url', 'original_url'),
+            ('title', 'title'),
+            ('price', 'price'),
+            ('image', 'image_link'),
+            ('extra_images', 'extra_images_links'),
+            ('user_content_images', 'user_content_images_links'),
+            ('all_images', 'all_images_links'),
+            ('user_content_html', 'user_content_html'),
+            ('user_content_text', 'user_content'),
+            ('characteristics', 'characteristics'),
+            ('specification_links', 'specification_links'),
+        ]
+
+        data = {}
+        for attribute_name_to_set, attribute_name_to_get in attributes_names:
+            try:
+                attribute_value = getattr(self, attribute_name_to_get)
+            except AttributeError as error:
+                logger.exception('PROGRAMMER error on parsing!', exc_info=error)
+                attribute_value = None
+            except (LookupError, TypeError) as error:
+                logger.exception('Error on parsing!', exc_info=error)
+                attribute_value = None
+
+            data[attribute_name_to_set] = attribute_value
 
         return data
