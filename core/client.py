@@ -36,10 +36,10 @@ from .parsers import (
 from .settings import (
     DEFAULT_DUMP_DIR,
     DEFAULT_CLIENT_ARGUMENTS,
-    DEFAULT_MINUTES_TO_SLEEP_ON_NETWORK_ERROR_IN_FUNCTION,
-    DEFAULT_MINUTES_TO_SLEEP_ON_ERROR,
-    DEFAULT_MINUTES_TO_BREAK_UP_BETWEEN_GROUP_DUMPING,
-    DEFAULT_MINUTES_SLEEP_AFTER_REQUEST,
+    MINUTES_TO_SLEEP_ON_NETWORK_ERROR_IN_FUNCTION,
+    MINUTES_TO_SLEEP_ON_ERROR,
+    MINUTES_TO_BREAK_UP_BETWEEN_GROUP_DUMPING,
+    MINUTES_TO_SLEEP_AFTER_REQUEST,
     LOGGING_CONFIG_PATH
 )
 from .types import Product
@@ -221,7 +221,7 @@ class ParserClient:
             url_pattern = url
 
         while is_any_unhandled_page:
-            seconds_to_sleep = int(DEFAULT_MINUTES_SLEEP_AFTER_REQUEST * 60)
+            seconds_to_sleep = int(MINUTES_TO_SLEEP_AFTER_REQUEST * 60)
             self._sleep_with_tqdm_bar(seconds_to_sleep)
 
             url = f'{url_pattern}page_{page_number}'
@@ -234,7 +234,7 @@ class ParserClient:
                 else:
                     logging.exception('Error has been occured during network interacting.', exc_info=error)
 
-                seconds_to_sleep = int(DEFAULT_MINUTES_TO_SLEEP_ON_NETWORK_ERROR_IN_FUNCTION * 60)
+                seconds_to_sleep = int(MINUTES_TO_SLEEP_ON_NETWORK_ERROR_IN_FUNCTION * 60)
                 self._sleep_with_tqdm_bar(seconds_to_sleep)
 
                 return self._get_products_links(url)
@@ -289,7 +289,7 @@ class ParserClient:
                 logging.error('Error has been occured during network interacting (read timeout).')
             else:
                 logging.exception('Error has been occured during network interacting.', exc_info=error)
-            seconds_to_sleep = int(DEFAULT_MINUTES_TO_SLEEP_ON_NETWORK_ERROR_IN_FUNCTION * 60)
+            seconds_to_sleep = int(MINUTES_TO_SLEEP_ON_NETWORK_ERROR_IN_FUNCTION * 60)
             self._sleep_with_tqdm_bar(seconds_to_sleep)
 
             return self._get_product(url)
@@ -302,7 +302,7 @@ class ParserClient:
             product = Product(parser)
             logger.info(f'Parsed product with name: {product.title}. From URL: {url}')
 
-            seconds_to_sleep = int(DEFAULT_MINUTES_SLEEP_AFTER_REQUEST * 60)
+            seconds_to_sleep = int(MINUTES_TO_SLEEP_AFTER_REQUEST * 60)
             self._sleep_with_tqdm_bar(seconds_to_sleep)
 
             return product
@@ -487,7 +487,7 @@ class ParserClient:
         except Exception as error:
             logging.exception('Error has been occured during network interacting.', exc_info=error)
 
-            seconds_to_sleep = int(DEFAULT_MINUTES_TO_SLEEP_ON_ERROR * 60)
+            seconds_to_sleep = int(MINUTES_TO_SLEEP_ON_ERROR * 60)
             self._sleep_with_tqdm_bar(seconds_to_sleep)
 
             handled_links = {product.original_url for product in products}
@@ -548,7 +548,7 @@ class ParserClient:
         except Exception as error:
             logging.exception('Error has been occured during network requesting.', exc_info=error)
 
-            seconds_to_sleep = int(DEFAULT_MINUTES_TO_SLEEP_ON_ERROR * 60)
+            seconds_to_sleep = int(MINUTES_TO_SLEEP_ON_ERROR * 60)
             self._sleep_with_tqdm_bar(seconds_to_sleep)
 
             return self.dump_product(url)
@@ -598,7 +598,7 @@ class ParserClient:
         :rtype: None
         """
 
-        seconds_to_sleep = int(DEFAULT_MINUTES_SLEEP_AFTER_REQUEST * 60)
+        seconds_to_sleep = int(MINUTES_TO_SLEEP_AFTER_REQUEST * 60)
         self._sleep_with_tqdm_bar(seconds_to_sleep)
 
         if isinstance(dir_name, str):
@@ -612,7 +612,7 @@ class ParserClient:
             else:
                 logger.exception('Error has been occured during network interacting.', exc_info=error)
 
-            seconds_to_sleep = int(DEFAULT_MINUTES_TO_SLEEP_ON_NETWORK_ERROR_IN_FUNCTION * 60)
+            seconds_to_sleep = int(MINUTES_TO_SLEEP_ON_NETWORK_ERROR_IN_FUNCTION * 60)
             self._sleep_with_tqdm_bar(seconds_to_sleep)
 
             self.dump_group(url, dir_name)
@@ -651,7 +651,7 @@ class ParserClient:
                 self.dump_products(url, products_dump_dir_name=group_dir_name, max_workers=max_workers)
                 logger.info(f'Group: {valid_group_name} - products is finished. Doing break...')
 
-                seconds_to_sleep = int(DEFAULT_MINUTES_TO_BREAK_UP_BETWEEN_GROUP_DUMPING * 60)
+                seconds_to_sleep = int(MINUTES_TO_BREAK_UP_BETWEEN_GROUP_DUMPING * 60)
                 self._sleep_with_tqdm_bar(seconds_to_sleep)
 
     @classmethod
