@@ -21,13 +21,6 @@ class BaseParser(abc.ABC):
     """
     Implements base abstract parser
     for inheriting.
-
-    .. attr:: _original_url
-
-    .. property:: original_url
-    .. property:: html_text
-
-    .. abstractproperty:: soup
     """
 
     def __init__(self, original_url: str, html_text: str) -> None:

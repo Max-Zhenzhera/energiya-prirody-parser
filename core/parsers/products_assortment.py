@@ -23,12 +23,6 @@ logger = logging.getLogger(__name__)
 class ProductsAssortmentParser(BaseParser):
     """
     Implements parser for the page with products assortment.
-
-    .. attr:: _soup
-
-    .. property:: soup(self) -> bs4.BeautifulSoup
-    .. property:: category(self) -> str
-    .. property:: links(self) -> list[str]
     """
 
     def __init__(self, original_url: str, html_text: str) -> None:

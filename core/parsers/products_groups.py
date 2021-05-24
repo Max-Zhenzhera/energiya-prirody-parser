@@ -23,12 +23,6 @@ logger = logging.getLogger(__name__)
 class ProductsGroupsParser(BaseParser):
     """
     Implements parser for the page with products groups.
-
-    .. attr:: _soup
-
-    .. property:: soup(self) -> bs4.BeautifulSoup
-    .. property:: group(self) -> str
-    .. property:: subgroups_links(self) -> list[str]
     """
 
     def __init__(self, original_url: str, html_text: str) -> None:
