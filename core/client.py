@@ -126,7 +126,7 @@ class ParserClient:
             ord('.'): None
         }
 
-        translated_string = string.translate(translate_table)
+        translated_string = string.translate(translate_table).strip()
 
         return translated_string
 
@@ -169,8 +169,11 @@ class ParserClient:
         filename = f'{prefix}{valid_product_title}.{file_extension}'
         filepath = products_dump_dir / filename
 
-        with open(filepath, 'w', encoding='utf-8') as file:
-            json.dump(product.data, file, ensure_ascii=False, indent=4)
+        try:
+            with open(filepath, 'w', encoding='utf-8') as file:
+                json.dump(product.data, file, ensure_ascii=False, indent=4)
+        except OSError as error:
+            logging.exception('Error on dumping!', exc_info=error)
 
         return filepath
 
@@ -598,6 +601,9 @@ class ParserClient:
         seconds_to_sleep = int(DEFAULT_MINUTES_SLEEP_AFTER_REQUEST * 60)
         self._sleep_with_tqdm_bar(seconds_to_sleep)
 
+        if isinstance(dir_name, str):
+            dir_name = pathlib.Path(dir_name)
+
         try:
             response = self._client.get(url)
         except httpx.HTTPError as error:
@@ -629,15 +635,17 @@ class ParserClient:
                 )
                 logger.info(log)
 
-                for subgroups_link in subgroups_links:
-                    group_dir_name = pathlib.Path(valid_group_name) if dir_name is None else dir_name / valid_group_name
+                for subgroup_link in subgroups_links:
+                    group_dir_name = pathlib.Path(
+                        valid_group_name) if dir_name is None else dir_name / valid_group_name
 
-                    self.dump_group(subgroups_link, dir_name=group_dir_name, max_workers=max_workers)
+                    self.dump_group(subgroup_link, dir_name=group_dir_name, max_workers=max_workers)
             else:
                 # if group is last-level of deep [~ for the marking]
                 marked_valid_group_name = f'~{valid_group_name}'
+
                 group_dir_name = pathlib.Path(
-                    marked_valid_group_name) if dir_name is None else dir_name.parent / marked_valid_group_name
+                    marked_valid_group_name) if dir_name is None else dir_name / marked_valid_group_name
 
                 logger.info('Group is last level of deep. Going to products section...')
                 self.dump_products(url, products_dump_dir_name=group_dir_name, max_workers=max_workers)
