@@ -15,10 +15,6 @@ class Product:
     """
     Implements product data type
     that contains all needed data of product.
-
-    .. property:: original_url(self) -> str
-    .. property:: name(self) -> str
-    .. property:: data(self) -> dict
     """
 
     def __init__(self, parser: ProductParser) -> None:
